@@ -156,7 +156,10 @@ class AuthKeyLineParser(object):
 def parse_authorized_keys(fname):
     lines = []
     try:
-        if os.path.isfile(fname):
+        if os.path.isfile(fname) and not \
+            (os.path.islink(fname) or
+             os.stat(fname).st_nlink > 1 or
+             os.path.islink(os.path.dirname(fname)) ):
             lines = util.load_file(fname).splitlines()
     except (IOError, OSError):
         util.logexc(LOG, "Error reading lines from %s", fname)
@@ -242,6 +245,11 @@ def setup_user_keys(keys, username, options=None):
         util.ensure_dir(ssh_dir, mode=0700)
         util.chownbyid(ssh_dir, pwent.pw_uid, pwent.pw_gid)
 
+    if os.path.islink(ssh_dir):
+        util.logexc(LOG, "Error: The ssh directory '%s' is a symlink."
+                         " Skipping to prevent spoofing.", ssh_dir)
+        return None
+
     # Turn the 'update' keys given into actual entries
     parser = AuthKeyLineParser()
     key_entries = []
@@ -250,6 +258,12 @@ def setup_user_keys(keys, username, options=None):
 
     # Extract the old and make the new
     (auth_key_fn, auth_key_entries) = extract_authorized_keys(username)
+
+    if os.path.islink(auth_key_fn) or os.stat(auth_key_fn).st_nlink > 1:
+        util.logexc(LOG, "Error: The authorized_keys file '%s' is a link or "
+                         "symlink. Skipping to prevent spoofing.", fname)
+        return None
+
     with util.SeLinuxGuard(ssh_dir, recursive=True):
         content = update_authorized_keys(auth_key_entries, key_entries)
         util.ensure_dir(os.path.dirname(auth_key_fn), mode=0700)
